@@ -13,7 +13,7 @@ import System.Directory
 import System.Environment
 import System.Exit
 
-logPacket :: (Applicative m, MonadIO m, MonadError String m) => AVFormatContext -> AVPacket -> String -> m ()
+logPacket :: (Applicative m, MonadIO m, MonadError HSFFError m) => AVFormatContext -> AVPacket -> String -> m ()
 logPacket ctx pkt tag = do
 	sid <- getField packet_stream_index pkt
 	mtime_base <- withStream ctx sid (getField avstream_time_base)
@@ -75,7 +75,7 @@ main = do
 								setNamedOption codec_codec_tag outCodecCtx 0
 								oflags <- getField outformat_flags ofmt
 								when (oflags `fhas` AVFmtGlobalheader)$ do
-									modNamedOption codec_flags outCodecCtx (<> t CodecFlagGlobalHeader)
+									modNamedOption codec_flags outCodecCtx (<> CodecFlagGlobalHeader)
 									return ()
 
 				dumpOutputFormat octx outFilename -- write output format to stdout
@@ -101,7 +101,7 @@ main = do
 
 			case r of
 				Left err -> do
-					putStrLn err
+					putStrLn$ formatError err
 					exitFailure
 				_ -> return ()
 		_ -> do
@@ -110,7 +110,7 @@ main = do
 			putStrLn$ "The output format is guessed according to the file extension."
 			exitFailure
 
-adjustPacket :: (Applicative m, MonadIO m, MonadError String m) =>
+adjustPacket :: (Applicative m, MonadIO m, MonadError HSFFError m) =>
 	AVFormatContext -> AVFormatContext -> AVPacket -> m ()
 adjustPacket inctx outctx pkt = do
 	sid <- getField packet_stream_index pkt
@@ -126,5 +126,5 @@ adjustPacket inctx outctx pkt = do
 			modField packet_duration pkt$ \duration -> fromIntegral$ rescaleQ (fromIntegral duration) in_timebase out_timebase
 			setField packet_pos pkt (-1)
 			logPacket outctx pkt "out"
-		_ -> throwError$ "adjustPacket: invalid timebase"
+		_ -> throwError$ HSFFError HSFFErrorUser "adjustPacket" "invalid timebase"
 

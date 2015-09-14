@@ -32,7 +32,7 @@ main = do
 
 			case r of
 				Left err -> do
-					putStrLn err
+					putStrLn$ formatError err
 					exitFailure
 				Right _ -> return ()
 
