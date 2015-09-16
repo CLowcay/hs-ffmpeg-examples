@@ -4,7 +4,8 @@ module Main where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Catch
+import Control.Monad.IO.Class
 import Data.Maybe
 import Data.Monoid
 import Media.FFMpeg
@@ -13,7 +14,7 @@ import System.Directory
 import System.Environment
 import System.Exit
 
-logPacket :: (Applicative m, MonadIO m, MonadError HSFFError m) => AVFormatContext -> AVPacket -> String -> m ()
+logPacket :: (Applicative m, MonadIO m, MonadThrow m) => AVFormatContext -> AVPacket -> String -> m ()
 logPacket ctx pkt tag = do
 	sid <- getField packet_stream_index pkt
 	mtime_base <- withStream ctx sid (getField avstream_time_base)
@@ -51,7 +52,7 @@ main = do
 				putStrLn$ "File not found " ++ inFilename
 				exitFailure
 
-			r <- runExceptT$ do
+			do
 				(ictx, _) <- openInput inFilename Nothing Nothing
 				findStreamInfo ictx M.empty
 
@@ -91,26 +92,22 @@ main = do
 					eof <- readFrame ictx pkt
 					when (not eof)$ do
 						adjustPacket ictx octx pkt
-						r <- lift.runExceptT$ interleavedWriteFrame octx pkt
-						case r of
-							Left err -> throwError err
-							Right _ -> rwloop
+						interleavedWriteFrame octx pkt
 
 				rwloop
 				writeTrailer octx
 
-			case r of
-				Left err -> do
-					putStrLn$ formatError err
-					exitFailure
-				_ -> return ()
+			`catch` \err -> do
+				putStrLn$ show (err :: HSFFError)
+				exitFailure
+
 		_ -> do
 			putStrLn$ "usage: " ++ pname ++ " <input_file> <output_file>"
 			putStrLn$ "API example program to remux a media file with libavformat and libavcodec."
 			putStrLn$ "The output format is guessed according to the file extension."
 			exitFailure
 
-adjustPacket :: (Applicative m, MonadIO m, MonadError HSFFError m) =>
+adjustPacket :: (Applicative m, MonadIO m, MonadThrow m) =>
 	AVFormatContext -> AVFormatContext -> AVPacket -> m ()
 adjustPacket inctx outctx pkt = do
 	sid <- getField packet_stream_index pkt
@@ -126,5 +123,5 @@ adjustPacket inctx outctx pkt = do
 			modField packet_duration pkt$ \duration -> fromIntegral$ rescaleQ (fromIntegral duration) in_timebase out_timebase
 			setField packet_pos pkt (-1)
 			logPacket outctx pkt "out"
-		_ -> throwError$ HSFFError HSFFErrorUser "adjustPacket" "invalid timebase"
+		_ -> throwM$ HSFFError HSFFErrorUser "adjustPacket" "invalid timebase"
 

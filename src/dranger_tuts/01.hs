@@ -4,7 +4,8 @@ module Main where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Catch
+import Control.Monad.IO.Class
 import Foreign.Marshal.Alloc
 import Foreign.Ptr
 import Media.FFMpeg
@@ -27,7 +28,7 @@ main = do
 				putStrLn$ "File not found " ++ fname
 				exitFailure
 			
-			r <- runExceptT$ do
+			do
 				(formatCtx, _) <- openInput fname Nothing Nothing
 				findStreamInfo formatCtx M.empty
 
@@ -47,20 +48,19 @@ main = do
 
 						readAndConvertFrames formatCtx codecCtx v
 						
-					_ -> throwError$ HSFFError HSFFErrorUser "" "No video stream found"
+					_ -> throwM$ HSFFError HSFFErrorUser "" "No video stream found"
 
-			case r of
-				Left err -> do
-					putStrLn$ formatError err
-					exitFailure
-				_ -> return ()
+			`catch` \err -> do
+				putStrLn$ show (err :: HSFFError)
+				exitFailure
+
 		_ -> do
 			putStrLn$ "usage: " ++ pname ++ " <input_file>"
 			putStrLn$ "Example program to decode a video stream"
 			exitFailure
 
 readAndConvertFrames ::
-	AVFormatContext -> AVCodecContext -> StreamIndex -> ExceptT HSFFError IO ()
+	AVFormatContext -> AVCodecContext -> StreamIndex -> IO ()
 readAndConvertFrames formatCtx codecCtx videoStream = do
 	width <- fromIntegral <$> getField codecctx_width codecCtx
 	height <- fromIntegral <$> getField codecctx_height codecCtx
@@ -73,7 +73,7 @@ readAndConvertFrames formatCtx codecCtx videoStream = do
 	pBuffer <- liftIO$ mallocBytes buffSize
 	pictureFill frameRGB pBuffer PixFmtRgb24 width height
 
-	err <- runExceptT$ do
+	(do
 		swsCtx <- getSwsContext
 			(width, height, fmt)
 			(width, height, PixFmtRgb24)
@@ -83,7 +83,7 @@ readAndConvertFrames formatCtx codecCtx videoStream = do
 			Nothing
 
 		packet <- mkAVPacket
-		
+
 		let readAndConvert count = do
 			isEOF <- readFrame formatCtx packet
 			when (not isEOF)$ do
@@ -96,14 +96,12 @@ readAndConvertFrames formatCtx codecCtx videoStream = do
 						scale swsCtx frame 0 height frameRGB
 						when ((count `mod` 5) == 0)$ do
 							saveFrame frameRGB width height count
-						readAndConvert$ count + 1
+							readAndConvert$ count + 1
 
 		readAndConvert 0
+		) `finally` (liftIO$ free pBuffer)
 
-	liftIO$ free pBuffer	
-	case err of
-		Left e -> throwError e
-		Right x -> return x
+	return ()
 
 saveFrame :: MonadIO m => AVFrame -> Int -> Int -> Int -> m ()
 saveFrame frame width height n = liftIO$ do

@@ -1,7 +1,8 @@
 module Main where
 
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Catch
+import Control.Monad.IO.Class
 import Media.FFMpeg
 import System.Directory
 import System.Environment
@@ -21,7 +22,7 @@ main = do
 				putStrLn$ "File not found " ++ fname
 				exitFailure
 
-			r <- runExceptT$ do
+			do
 				(ctx, dict) <- openInput fname Nothing Nothing
 				vals <- dictGetAll =<< getDictField ctx format_metadata
 				if (null vals) then
@@ -30,11 +31,9 @@ main = do
 					forM_ vals$ \(key, val) -> do
 						liftIO.putStrLn$ key ++ "=" ++ val
 
-			case r of
-				Left err -> do
-					putStrLn$ formatError err
+			`catch` \e -> do
+					putStrLn$ show (e :: HSFFError)
 					exitFailure
-				Right _ -> return ()
 
 		_ -> do
 			putStrLn$ "usage: " ++ pname ++ " <input_file>"
