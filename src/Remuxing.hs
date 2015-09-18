@@ -93,6 +93,7 @@ main = do
 					when (not eof)$ do
 						adjustPacket ictx octx pkt
 						interleavedWriteFrame octx pkt
+						rwloop
 
 				rwloop
 				writeTrailer octx
@@ -107,8 +108,7 @@ main = do
 			putStrLn$ "The output format is guessed according to the file extension."
 			exitFailure
 
-adjustPacket :: (Applicative m, MonadIO m, MonadThrow m) =>
-	AVFormatContext -> AVFormatContext -> AVPacket -> m ()
+adjustPacket :: AVFormatContext -> AVFormatContext -> AVPacket -> IO ()
 adjustPacket inctx outctx pkt = do
 	sid <- getField packet_stream_index pkt
 	min_timebase <- withStream inctx sid$ getField avstream_time_base
@@ -120,7 +120,8 @@ adjustPacket inctx outctx pkt = do
 			logPacket inctx pkt "in"
 			modField packet_pts pkt$ \pts -> rescaleTSQRnd pts in_timebase out_timebase rflags
 			modField packet_dts pkt$ \dts -> rescaleTSQRnd dts in_timebase out_timebase rflags
-			modField packet_duration pkt$ \duration -> fromIntegral$ rescaleQ (fromIntegral duration) in_timebase out_timebase
+			modField packet_duration pkt$ \duration -> max 0$ fromIntegral$
+				rescaleQ (fromIntegral duration) in_timebase out_timebase
 			setField packet_pos pkt (-1)
 			logPacket outctx pkt "out"
 		_ -> throwM$ HSFFError HSFFErrorUser "adjustPacket" "invalid timebase"
